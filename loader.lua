@@ -1,138 +1,171 @@
 --[[
-    SWILL Deep Scanner v2.0
-    Сканирует ВСЕ GUI-элементы включая CoreGui
-    Сохраняет результаты в файл
+    SWILL Auto Reconnect v2.0
+    Целится точно в кнопки CoreGui
 ]]
 
-local Players = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
-local CoreGui = game:GetService("CoreGui")
+local success, err = pcall(function()
 
--- Функция для записи в файл (сохраняем на раб столе)
-local function writeToFile(content)
-    pcall(function()
-        if writefile then
-            writefile("SWILL_scan_results.txt", content)
-            print("[SWILL] Результаты сохранены в SWILL_scan_results.txt")
-        end
-    end)
-end
+    local Players = game:GetService("Players")
+    local LocalPlayer = Players.LocalPlayer
+    local VirtualInputManager = game:GetService("VirtualInputManager")
+    local CoreGui = game:GetService("CoreGui")
 
--- Сбор всей информации
-local function deepScan()
-    local results = {}
-    table.insert(results, "==================== СКАНИРОВАНИЕ " .. os.date() .. " ====================")
-    
-    local allGuis = {}
-    
-    -- PlayerGui
-    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
-    if playerGui then
-        table.insert(allGuis, {"PlayerGui", playerGui})
+    print("[SWILL] Auto Reconnect v2.0 запущен")
+    print("[SWILL] Мониторю CoreGui на ошибки соединения...")
+
+    -- === ФУНКЦИЯ КЛИКА ===
+    local function clickButton(button)
+        if not button then return false end
+        pcall(function()
+            if not button.Visible then return end
+            local pos = button.AbsolutePosition
+            local size = button.AbsoluteSize
+            local x = pos.X + size.X / 2
+            local y = pos.Y + size.Y / 2
+
+            VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 0)
+            task.wait(0.05)
+            VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
+            print("[SWILL] Клик по кнопке: " .. tostring(button.Name))
+        end)
+        return true
     end
-    
-    -- CoreGui
-    table.insert(allGuis, {"CoreGui", CoreGui})
-    
-    -- Ищем вообще все ScreenGui
-    for _, obj in ipairs(game:GetDescendants()) do
-        if obj:IsA("ScreenGui") and obj ~= playerGui and obj.Parent ~= CoreGui then
-            table.insert(allGuis, {"Unknown ScreenGui: " .. obj.Name, obj})
-        end
-    end
-    
-    -- Сканируем каждый GUI
-    for _, guiData in ipairs(allGuis) do
-        local guiName = guiData[1]
-        local guiObj = guiData[2]
-        
-        table.insert(results, "\n📁 " .. guiName .. " (" .. guiObj.ClassName .. ")")
-        
-        local foundInThis = 0
-        for _, obj in ipairs(guiObj:GetDescendants()) do
-            if obj:IsA("TextButton") or obj:IsA("ImageButton") then
-                foundInThis = foundInThis + 1
+
+    -- === ПОИСК КНОПОК RECONNECT В COREGUI ===
+    local function findReconnectInCoreGui()
+        -- Ищем по всем элементам CoreGui
+        for _, obj in ipairs(CoreGui:GetDescendants()) do
+            if obj:IsA("TextButton") and obj.Visible then
                 pcall(function()
-                    local info = "├─ [" .. obj.ClassName .. "]"
-                    info = info .. " Name: " .. tostring(obj.Name)
-                    if obj:IsA("TextButton") then
-                        info = info .. " | Text: '" .. tostring(obj.Text) .. "'"
-                    end
-                    info = info .. " | Visible: " .. tostring(obj.Visible)
-                    info = info .. " | Active: " .. tostring(obj.Active)
-                    info = info .. " | Size: " .. tostring(obj.AbsoluteSize.X) .. "x" .. tostring(obj.AbsoluteSize.Y)
-                    info = info .. " | Pos: " .. tostring(obj.AbsolutePosition.X) .. "," .. tostring(obj.AbsolutePosition.Y)
-                    if obj.Parent then
-                        info = info .. " | Parent: " .. tostring(obj.Parent.Name)
-                    end
-                    table.insert(results, info)
-                end)
-            end
-            -- Текстовые метки
-            if obj:IsA("TextLabel") and obj.Visible then
-                pcall(function()
-                    local text = tostring(obj.Text)
-                    if #text > 2 and #text < 200 then
-                        table.insert(results, "├─ [TEXT] '" .. text .. "' | Parent: " .. tostring(obj.Parent.Name))
+                    local text = obj.Text:lower()
+                    local name = obj.Name:lower()
+
+                    -- Ключевые слова для поиска
+                    local keywords = {
+                        "accept",
+                        "ok",
+                        "okay",
+                        "reconnect",
+                        "rejoin",
+                        "retry",
+                        "continue",
+                        "restart",
+                        "yes",
+                        "confirm"
+                    }
+
+                    for _, kw in ipairs(keywords) do
+                        if text:find(kw) or name:find(kw) then
+                            return obj
+                        end
                     end
                 end)
             end
         end
-        table.insert(results, "└─ Всего найдено: " .. foundInThis .. " кнопок")
+        return nil
     end
-    
-    table.insert(results, "==================== КОНЕЦ СКАНИРОВАНИЯ ====================")
-    
-    local fullText = table.concat(results, "\n")
-    print(fullText)
-    writeToFile(fullText)
-    
-    return fullText
-end
 
--- Ждём 5 секунд после запуска, потом сканируем
-print("[SWILL] Сканер запущен. Жду 5 секунд...")
-print("[SWILL] Через 5 секунд буду сканировать ВСЕ кнопки на экране.")
-print("[SWILL] СПЕЦИАЛЬНО ВЫЗОВИ ОШИБКУ ИНТЕРНЕТА (выдерни кабель/WiFi)")
-print("[SWILL] И когда появится окно с Reconnect - НАЖМИ В КОНСОЛИ ДЕЛЬТЫ КНОПКУ:")
-print("[SWILL] ==> СКАНИРОВАТЬ СНОВА <==")
-print("[SWILL] Или просто подожди 30 секунд, сканер сам всё проверит")
+    -- === ПОИСК ТЕКСТА ОШИБКИ В COREGUI ===
+    local function isErrorInCoreGui()
+        local errorPhrases = {
+            "disconnected",
+            "connection timed out",
+            "lost connection",
+            "connection lost",
+            "timeout",
+            "timed out",
+            "no internet",
+            "network error",
+            "error 277",
+            "error 260",
+            "error 268",
+            "please reconnect",
+            "check your internet",
+            "reconnect to",
+            "server disconnected",
+            "kicked",
+            "please wait",
+            "restart",
+            "warning",
+            "headset disconnected",
+            "teleporting"
+        }
 
--- Первое сканирование через 5 секунд (что есть на экране сейчас)
-task.wait(5)
-print("\n[SWILL] === ПЕРВОЕ СКАНИРОВАНИЕ (то что на экране сейчас) ===")
-deepScan()
+        for _, obj in ipairs(CoreGui:GetDescendants()) do
+            if (obj:IsA("TextLabel") or obj:IsA("TextButton")) and obj.Visible then
+                pcall(function()
+                    local text = obj.Text:lower()
+                    for _, phrase in ipairs(errorPhrases) do
+                        if text:find(phrase) then
+                            print("[SWILL] Обнаружен текст ошибки: '" .. tostring(obj.Text) .. "'")
+                            return true
+                        end
+                    end
+                end)
+            end
+        end
+        return false
+    end
 
--- Автоматическое сканирование каждые 15 секунд (на случай если ошибка появится)
-local scanCount = 0
-while true do
-    task.wait(15)
-    scanCount = scanCount + 1
-    print("\n[SWILL] === АВТОСКАНИРОВАНИЕ #" .. scanCount .. " ===")
-    
-    -- Проверяем есть ли на экране что-то похожее на ошибку
-    pcall(function()
-        local allTexts = ""
-        for _, guiObj in ipairs({LocalPlayer:FindFirstChild("PlayerGui"), CoreGui}) do
-            if guiObj then
-                for _, obj in ipairs(guiObj:GetDescendants()) do
-                    if obj:IsA("TextLabel") and obj.Visible then
-                        pcall(function()
-                            allTexts = allTexts .. tostring(obj.Text):lower() .. " "
-                        end)
+    -- === ТАКЖЕ ПРОВЕРЯЕМ PLAYERGUI ===
+    local function isErrorInPlayerGui()
+        local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+        if not playerGui then return false end
+
+        local errorPhrases = {
+            "disconnected",
+            "connection timed out",
+            "lost connection",
+            "reconnect",
+            "timeout",
+            "timed out"
+        }
+
+        for _, obj in ipairs(playerGui:GetDescendants()) do
+            if (obj:IsA("TextLabel") or obj:IsA("TextButton")) and obj.Visible then
+                pcall(function()
+                    local text = obj.Text:lower()
+                    for _, phrase in ipairs(errorPhrases) do
+                        if text:find(phrase) then
+                            print("[SWILL] Обнаружена ошибка в PlayerGui: '" .. tostring(obj.Text) .. "'")
+                            return true
+                        end
+                    end
+                end)
+            end
+        end
+        return false
+    end
+
+    -- === ГЛАВНЫЙ ЦИКЛ ===
+    local lastClickTime = 0
+
+    while true do
+        pcall(function()
+            local hasError = isErrorInCoreGui() or isErrorInPlayerGui()
+
+            if hasError then
+                local now = tick()
+                if now - lastClickTime > 1 then -- Задержка между попытками
+                    local button = findReconnectInCoreGui()
+                    if button then
+                        print("[SWILL] Найдена кнопка: " .. tostring(button.Name) .. " | Текст: " .. tostring(button.Text))
+                        clickButton(button)
+                        lastClickTime = now
+                    else
+                        print("[SWILL] Ошибка обнаружена, но кнопка не найдена. Пробую ещё раз через секунду...")
                     end
                 end
             end
-        end
-        
-        local errorKeywords = {"disconnect", "timeout", "reconnect", "lost connection", "timed out", "error"}
-        for _, kw in ipairs(errorKeywords) do
-            if allTexts:find(kw) then
-                print("[SWILL] 🚨 НАЙДЕНА ОШИБКА! Ключевое слово: " .. kw)
-                print("[SWILL] Делаю глубокое сканирование прямо сейчас...")
-                deepScan()
-                break
-            end
-        end
-    end)
+        end)
+        task.wait(0.5) -- Проверка каждые полсекунды
+    end
+
+end)
+
+if not success then
+    warn("[SWILL] Критическая ошибка: " .. tostring(err))
+    task.wait(3)
+    -- Автоперезапуск
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/AvianLil/Legacy/main/loader.lua"))()
 end
