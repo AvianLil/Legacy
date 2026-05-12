@@ -47,7 +47,7 @@ local success, err = pcall(function()
     -- Главный цикл — проверка раз в 2 секунды
     while true do
         pcall(findAndClickReconnect)
-        task.wait(2)
+        task.wait(30)
     end
 
 end)
